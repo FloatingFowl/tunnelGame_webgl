@@ -1,34 +1,1058 @@
-<!DOCTYPE html>
 <html>
+
 <head>
-  <meta content="text/html;charset=utf-8" http-equiv="Content-Type">
-  <meta content="utf-8" http-equiv="encoding">
-  <script
-    src="https://code.jquery.com/jquery-3.2.1.min.js"
-    integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4="
-    crossorigin="anonymous"></script>
+<title>Tunnel Rush</title>
+<meta http-equiv="content-type" content="text/html; charset=ISO-8859-1">
 
-  <title>WEBGL TUNNEL BOIS</title>
+<script type="text/javascript" src="glMatrix-0.9.5.min.js"></script>
+<script type="text/javascript" src="webgl-utils.js"></script>
 
-  <style>
-  * {
-    padding: 0;
-    margin: 0;
-  }
+<script id="per-fragment-lighting-fs" type="x-shader/x-fragment">
+    precision mediump float;
 
-  #canvasContainer {
-    background: black;
-    text-align: center;
-  }
-  </style>
+    varying vec2 vTextureCoord;
+    varying vec3 vTransformedNormal;
+    varying vec4 vPosition;
+
+    uniform float uMaterialShininess;
+
+    uniform bool uShowSpecularHighlights;
+    uniform bool uUseLighting;
+    uniform bool uUseGrayscale;
+    uniform bool uUseTextures;
+
+    uniform vec3 uAmbientColor;
+
+    uniform vec3 uPointLightingLocation;
+    uniform vec3 uPointLightingSpecularColor;
+    uniform vec3 uPointLightingDiffuseColor;
+
+    uniform sampler2D uSampler;
+
+
+    void main(void) {
+        vec3 lightWeighting;
+        if (!uUseLighting) {
+            lightWeighting = vec3(1.0, 1.0, 1.0);
+        } else {
+            vec3 lightDirection = normalize(uPointLightingLocation - vPosition.xyz);
+            vec3 normal = normalize(vTransformedNormal);
+
+            float specularLightWeighting = 0.0;
+            if (uShowSpecularHighlights) {
+                vec3 eyeDirection = normalize(-vPosition.xyz);
+                vec3 reflectionDirection = reflect(-lightDirection, normal);
+
+                specularLightWeighting = pow(max(dot(reflectionDirection, eyeDirection), 0.0), uMaterialShininess);
+            }
+
+            float diffuseLightWeighting = max(dot(normal, lightDirection), 0.0);
+            lightWeighting = uAmbientColor
+                + uPointLightingSpecularColor * specularLightWeighting
+                + uPointLightingDiffuseColor * diffuseLightWeighting;
+        }
+
+        vec4 fragmentColor;
+        if (uUseTextures) {
+            fragmentColor = texture2D(uSampler, vec2(vTextureCoord.s, vTextureCoord.t));
+        } else {
+            fragmentColor = vec4(1.0, 1.0, 1.0, 1.0);
+        }
+
+        if (uUseGrayscale) {
+            float f = 1.0;
+            float L = 0.3*fragmentColor.r + 0.6*fragmentColor.g + 0.1*fragmentColor.b;
+            fragmentColor.r = fragmentColor.r + f * (L - fragmentColor.r);
+            fragmentColor.g = fragmentColor.g + f * (L - fragmentColor.g);
+            fragmentColor.b = fragmentColor.b + f * (L - fragmentColor.b);
+        }
+
+        gl_FragColor = vec4(fragmentColor.rgb * lightWeighting, fragmentColor.a);
+    }
+</script>
+
+<script id="per-fragment-lighting-vs" type="x-shader/x-vertex">
+    attribute vec3 aVertexPosition;
+    attribute vec3 aVertexNormal;
+    attribute vec2 aTextureCoord;
+
+    uniform mat4 uMVMatrix;
+    uniform mat4 uPMatrix;
+    uniform mat3 uNMatrix;
+
+    varying vec2 vTextureCoord;
+    varying vec3 vTransformedNormal;
+    varying vec4 vPosition;
+
+
+    void main(void) {
+        vPosition = uMVMatrix * vec4(aVertexPosition, 1.0);
+        gl_Position = uPMatrix * vPosition;
+        vTextureCoord = aTextureCoord;
+        vTransformedNormal = uNMatrix * aVertexNormal;
+    }
+</script>
+
+
+<script type="text/javascript">
+
+    var gl;
+    var cols = ["red", "green", "yellow", "blue", "orange", "purple", "cyan", "magenta", "lime", "pink", "teal", "lavender"];
+    var obss = ["rod1", "rod2", "semi1", "semi2", "wall1", "wall2"]
+
+    function initGL(canvas) {
+        try {
+            gl = canvas.getContext("experimental-webgl");
+            gl.viewportWidth = canvas.width;
+            gl.viewportHeight = canvas.height;
+        } catch (e) {
+        }
+        if (!gl) {
+            alert("Could not initialise WebGL, sorry :-(");
+        }
+    }
+
+
+    function getShader(gl, id) {
+        var shaderScript = document.getElementById(id);
+        if (!shaderScript) {
+            return null;
+        }
+
+        var str = "";
+        var k = shaderScript.firstChild;
+        while (k) {
+            if (k.nodeType == 3) {
+                str += k.textContent;
+            }
+            k = k.nextSibling;
+        }
+
+        var shader;
+        if (shaderScript.type == "x-shader/x-fragment") {
+            shader = gl.createShader(gl.FRAGMENT_SHADER);
+        } else if (shaderScript.type == "x-shader/x-vertex") {
+            shader = gl.createShader(gl.VERTEX_SHADER);
+        } else {
+            return null;
+        }
+
+        gl.shaderSource(shader, str);
+        gl.compileShader(shader);
+
+        if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+            alert(gl.getShaderInfoLog(shader));
+            return null;
+        }
+
+        return shader;
+    }
+
+
+    var shaderProgram;
+
+    function initShaders() {
+        var fragmentShader = getShader(gl, "per-fragment-lighting-fs");
+        var vertexShader = getShader(gl, "per-fragment-lighting-vs");
+
+        shaderProgram = gl.createProgram();
+        gl.attachShader(shaderProgram, vertexShader);
+        gl.attachShader(shaderProgram, fragmentShader);
+        gl.linkProgram(shaderProgram);
+
+        if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
+            alert("Could not initialise shaders");
+        }
+
+        gl.useProgram(shaderProgram);
+
+        shaderProgram.vertexPositionAttribute = gl.getAttribLocation(shaderProgram, "aVertexPosition");
+        gl.enableVertexAttribArray(shaderProgram.vertexPositionAttribute);
+
+        shaderProgram.vertexNormalAttribute = gl.getAttribLocation(shaderProgram, "aVertexNormal");
+        gl.enableVertexAttribArray(shaderProgram.vertexNormalAttribute);
+
+        shaderProgram.textureCoordAttribute = gl.getAttribLocation(shaderProgram, "aTextureCoord");
+        gl.enableVertexAttribArray(shaderProgram.textureCoordAttribute);
+
+        shaderProgram.pMatrixUniform = gl.getUniformLocation(shaderProgram, "uPMatrix");
+        shaderProgram.mvMatrixUniform = gl.getUniformLocation(shaderProgram, "uMVMatrix");
+        shaderProgram.nMatrixUniform = gl.getUniformLocation(shaderProgram, "uNMatrix");
+        shaderProgram.samplerUniform = gl.getUniformLocation(shaderProgram, "uSampler");
+        shaderProgram.materialShininessUniform = gl.getUniformLocation(shaderProgram, "uMaterialShininess");
+        shaderProgram.showSpecularHighlightsUniform = gl.getUniformLocation(shaderProgram, "uShowSpecularHighlights");
+        shaderProgram.useTexturesUniform = gl.getUniformLocation(shaderProgram, "uUseTextures");
+        shaderProgram.useGrayscaleUniform = gl.getUniformLocation(shaderProgram, "uUseGrayscale");
+        shaderProgram.useLightingUniform = gl.getUniformLocation(shaderProgram, "uUseLighting");
+        shaderProgram.ambientColorUniform = gl.getUniformLocation(shaderProgram, "uAmbientColor");
+        shaderProgram.pointLightingLocationUniform = gl.getUniformLocation(shaderProgram, "uPointLightingLocation");
+        shaderProgram.pointLightingSpecularColorUniform = gl.getUniformLocation(shaderProgram, "uPointLightingSpecularColor");
+        shaderProgram.pointLightingDiffuseColorUniform = gl.getUniformLocation(shaderProgram, "uPointLightingDiffuseColor");
+    }
+
+
+    function handleLoadedTexture(texture) {
+        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+        gl.bindTexture(gl.TEXTURE_2D, texture);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, texture.image);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_NEAREST);
+        gl.generateMipmap(gl.TEXTURE_2D);
+
+        gl.bindTexture(gl.TEXTURE_2D, null);
+    }
+
+    var textureCollection = {};
+
+    function initTextures() {
+        textureCollection.red = gl.createTexture();
+        textureCollection.red.image = new Image();
+        textureCollection.red.image.onload = function () {
+            handleLoadedTexture(textureCollection.red) }
+        textureCollection.red.image.src = 'color_1.jpg'
+
+        textureCollection.green = gl.createTexture();
+        textureCollection.green.image = new Image();
+        textureCollection.green.image.onload = function () {
+            handleLoadedTexture(textureCollection.green) }
+        textureCollection.green.image.src = 'color_2.jpg'
+
+        textureCollection.yellow = gl.createTexture();
+        textureCollection.yellow.image = new Image();
+        textureCollection.yellow.image.onload = function () {
+            handleLoadedTexture(textureCollection.yellow) }
+        textureCollection.yellow.image.src = 'color_3.jpg'
+
+        textureCollection.blue = gl.createTexture();
+        textureCollection.blue.image = new Image();
+        textureCollection.blue.image.onload = function () {
+            handleLoadedTexture(textureCollection.blue) }
+        textureCollection.blue.image.src = 'color_4.jpg'
+
+        textureCollection.orange = gl.createTexture();
+        textureCollection.orange.image = new Image();
+        textureCollection.orange.image.onload = function () {
+            handleLoadedTexture(textureCollection.orange) }
+        textureCollection.orange.image.src = 'color_5.jpg'
+
+        textureCollection.purple = gl.createTexture();
+        textureCollection.purple.image = new Image();
+        textureCollection.purple.image.onload = function () {
+            handleLoadedTexture(textureCollection.purple) }
+        textureCollection.purple.image.src = 'color_6.jpg'
+
+        textureCollection.cyan = gl.createTexture();
+        textureCollection.cyan.image = new Image();
+        textureCollection.cyan.image.onload = function () {
+            handleLoadedTexture(textureCollection.cyan) }
+        textureCollection.cyan.image.src = 'color_7.jpg'
+
+        textureCollection.magenta = gl.createTexture();
+        textureCollection.magenta.image = new Image();
+        textureCollection.magenta.image.onload = function () {
+            handleLoadedTexture(textureCollection.magenta) }
+        textureCollection.magenta.image.src = 'color_8.jpg'
+
+        textureCollection.lime = gl.createTexture();
+        textureCollection.lime.image = new Image();
+        textureCollection.lime.image.onload = function () {
+            handleLoadedTexture(textureCollection.lime) }
+        textureCollection.lime.image.src = 'color_9.jpg'
+
+        textureCollection.pink = gl.createTexture();
+        textureCollection.pink.image = new Image();
+        textureCollection.pink.image.onload = function () {
+            handleLoadedTexture(textureCollection.pink) }
+        textureCollection.pink.image.src = 'color_10.jpg'
+
+        textureCollection.teal = gl.createTexture();
+        textureCollection.teal.image = new Image();
+        textureCollection.teal.image.onload = function () {
+            handleLoadedTexture(textureCollection.teal) }
+        textureCollection.teal.image.src = 'color_11.jpg'
+
+        textureCollection.lavender = gl.createTexture();
+        textureCollection.lavender.image = new Image();
+        textureCollection.lavender.image.onload = function () {
+            handleLoadedTexture(textureCollection.lavender) }
+        textureCollection.lavender.image.src = 'color_12.jpg'
+
+        textureCollection.rod1 = gl.createTexture();
+        textureCollection.rod1.image = new Image();
+        textureCollection.rod1.image.onload = function () {
+            handleLoadedTexture(textureCollection.rod1) }
+        textureCollection.rod1.image.src = 'rod_1.jpg'
+
+        textureCollection.rod2 = gl.createTexture();
+        textureCollection.rod2.image = new Image();
+        textureCollection.rod2.image.onload = function () {
+            handleLoadedTexture(textureCollection.rod2) }
+        textureCollection.rod2.image.src = 'rod_2.jpg'
+
+        textureCollection.brick = gl.createTexture();
+        textureCollection.brick.image = new Image();
+        textureCollection.brick.image.onload = function () {
+            handleLoadedTexture(textureCollection.brick) }
+        textureCollection.brick.image.src = 'brick.jpg'
+    }
+
+
+    var mvMatrix = mat4.create();
+    var mvMatrixStack = [];
+    var pMatrix = mat4.create();
+
+    function mvPushMatrix() {
+        var copy = mat4.create();
+        mat4.set(mvMatrix, copy);
+        mvMatrixStack.push(copy);
+    }
+
+    function mvPopMatrix() {
+        if (mvMatrixStack.length == 0) {
+            throw "Invalid popMatrix!";
+        }
+        mvMatrix = mvMatrixStack.pop();
+    }
+
+    function setMatrixUniforms() {
+        gl.uniformMatrix4fv(shaderProgram.pMatrixUniform, false, pMatrix);
+        gl.uniformMatrix4fv(shaderProgram.mvMatrixUniform, false, mvMatrix);
+
+        var normalMatrix = mat3.create();
+        mat4.toInverseMat3(mvMatrix, normalMatrix);
+        mat3.transpose(normalMatrix);
+        gl.uniformMatrix3fv(shaderProgram.nMatrixUniform, false, normalMatrix);
+    }
+
+    function degToRad(degrees) {
+        return degrees * Math.PI / 180;
+    }
+
+    var currentlyPressedKeys = {};
+    var djmap = {0:1.2, 1:1.1, 2:1.0, 3:0.9, 4:0.8, 5:0.7, 6:0.8, 7:0.8, 8:0.9, 9:1.0, 10:1.1, 11:1.2}
+
+    function handleKeyDown(event) {
+        currentlyPressedKeys[event.keyCode] = true;
+        if (String.fromCharCode(event.keyCode) == "D") {
+            curpos = (curpos + 1) % 12;
+            //if(curpos == 9 || curpos == 2) distjump = 1.2;
+            //if(curpos == 8 || curpos == 3) distjump = 0.7;
+            distjump = djmap[curpos]
+            if(!jump) truejumpval = distjump;
+            turntaken = 1;
+        }
+        if (String.fromCharCode(event.keyCode) == "A") {
+            curpos = (12 + curpos - 1) % 12;
+            //if(curpos == 9 || curpos == 2) distjump = 1.2;
+            //if(curpos == 8 || curpos == 3) distjump = 0.7;
+            distjump = djmap[curpos]
+            if(!jump) truejumpval = distjump;
+            turntaken = -1;
+        }
+        if (event.keyCode === 32) { //space
+            if(jump == false) jump = true, jumpval = 0;
+        }
+        if (String.fromCharCode(event.keyCode) === "Q") {
+            specularHighlights = !specularHighlights;
+        }
+        if (String.fromCharCode(event.keyCode) === "W") {
+            lighting = !lighting;
+        }
+        if (String.fromCharCode(event.keyCode) === "E") {
+            grayscale = !grayscale;
+        }
+        if (String.fromCharCode(event.keyCode) === "R") {
+            overrideDeath = !overrideDeath;
+        }
+        if (event.keyCode === 13 && gamemode === 0) { //Enter
+            gamemode = 1;
+            lastTime = new Date().getTime();
+            var help = document.getElementById("pregame");
+            var scoreboard = document.getElementById("ingame");
+            help.setAttribute("hidden", "true");
+            scoreboard.removeAttribute("hidden");
+        }
+        if (String.fromCharCode(event.keyCode) === "P" && gamemode != -1) {
+            gamemode = 0;
+            var help = document.getElementById("pregame");
+            var scoreboard = document.getElementById("ingame");
+            scoreboard.setAttribute("hidden", "true");
+            help.removeAttribute("hidden");
+        }
+    }
+    function handleKeyUp(event) {
+        currentlyPressedKeys[event.keyCode] = false;
+    }
+
+    //display variables
+    var specularHighlights = false;
+    var lighting = false;
+    var grayscale = false;
+    var overrideDeath = false;
+    // pl
+    var points = 0;
+    var gamemode = 0;
+    var level = 1;
+    // mainguy
+    var distjump = 1.2;
+    var curpos = 9;
+    var turntaken = 0;
+    var jump = false;
+    var jumpval = 0;
+    var truejumpval = distjump;
+    // camera stuff
+    var pitch = 10;
+    var pitchRate = 0;
+    var yaw = 210;
+    var yawRate = 0;
+    var xPos = -8.6;
+    //var yPos = -1.8;
+    var yPos = 0.0;
+    var zPos = 0;
+    var speed = 0;
+
+    function handleKeys() {
+    }
+
+
+    var tunnel = {}
+    var obstacle = {}
+
+    function handleLoadedObstacle(tunnelData, col) {
+        obstacle[col] = {}
+        obstacle[col].VertexNormalBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, obstacle[col].VertexNormalBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(tunnelData.vertexNormals), gl.STATIC_DRAW);
+        obstacle[col].VertexNormalBuffer.itemSize = 3;
+        obstacle[col].VertexNormalBuffer.numItems = tunnelData.vertexNormals.length / 3;
+
+        obstacle[col].VertexTextureCoordBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, obstacle[col].VertexTextureCoordBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(tunnelData.vertexTextureCoords), gl.STATIC_DRAW);
+        obstacle[col].VertexTextureCoordBuffer.itemSize = 2;
+        obstacle[col].VertexTextureCoordBuffer.numItems = tunnelData.vertexTextureCoords.length / 2;
+
+        obstacle[col].VertexPositionBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, obstacle[col].VertexPositionBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(tunnelData.vertexPositions), gl.STATIC_DRAW);
+        obstacle[col].VertexPositionBuffer.itemSize = 3;
+        obstacle[col].VertexPositionBuffer.numItems = tunnelData.vertexPositions.length / 3;
+
+        obstacle[col].VertexIndexBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, obstacle[col].VertexIndexBuffer);
+        gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(tunnelData.indices), gl.STATIC_DRAW);
+        obstacle[col].VertexIndexBuffer.itemSize = 1;
+        obstacle[col].VertexIndexBuffer.numItems = tunnelData.indices.length;
+
+        obstacle[col].angle = Math.floor(Math.random() * 12) * 30;
+    }
+
+
+    function handleLoadedTunnel(tunnelData, col) {
+        tunnel[col] = {}
+        tunnel[col].VertexNormalBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, tunnel[col].VertexNormalBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(tunnelData.vertexNormals), gl.STATIC_DRAW);
+        tunnel[col].VertexNormalBuffer.itemSize = 3;
+        tunnel[col].VertexNormalBuffer.numItems = tunnelData.vertexNormals.length / 3;
+
+        tunnel[col].VertexTextureCoordBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, tunnel[col].VertexTextureCoordBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(tunnelData.vertexTextureCoords), gl.STATIC_DRAW);
+        tunnel[col].VertexTextureCoordBuffer.itemSize = 2;
+        tunnel[col].VertexTextureCoordBuffer.numItems = tunnelData.vertexTextureCoords.length / 2;
+
+        tunnel[col].VertexPositionBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, tunnel[col].VertexPositionBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(tunnelData.vertexPositions), gl.STATIC_DRAW);
+        tunnel[col].VertexPositionBuffer.itemSize = 3;
+        tunnel[col].VertexPositionBuffer.numItems = tunnelData.vertexPositions.length / 3;
+
+        tunnel[col].VertexIndexBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, tunnel[col].VertexIndexBuffer);
+        gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(tunnelData.indices), gl.STATIC_DRAW);
+        tunnel[col].VertexIndexBuffer.itemSize = 1;
+        tunnel[col].VertexIndexBuffer.numItems = tunnelData.indices.length;
+    }
+
+    function loadTunnel() {
+        var req1 = new XMLHttpRequest();
+        req1.open('GET', 'tube1.json');
+        req1.onreadystatechange = function () {
+            if (req1.readyState == 4) {
+                handleLoadedTunnel(JSON.parse(req1.responseText), "red");
+        }}
+        req1.send();
+        var req2 = new XMLHttpRequest();
+        req2.open('GET', 'tube2.json');
+        req2.onreadystatechange = function () {
+            if (req2.readyState == 4) {
+                handleLoadedTunnel(JSON.parse(req2.responseText), "green");
+        }}
+        req2.send();
+        var req3 = new XMLHttpRequest();
+        req3.open('GET', 'tube3.json');
+        req3.onreadystatechange = function () {
+            if (req3.readyState == 4) {
+                handleLoadedTunnel(JSON.parse(req3.responseText), "yellow");
+        }}
+        req3.send();
+        var req4 = new XMLHttpRequest();
+        req4.open('GET', 'tube4.json');
+        req4.onreadystatechange = function () {
+            if (req4.readyState == 4) {
+                handleLoadedTunnel(JSON.parse(req4.responseText), "blue");
+        }}
+        req4.send();
+        var req5 = new XMLHttpRequest();
+        req5.open('GET', 'tube5.json');
+        req5.onreadystatechange = function () {
+            if (req5.readyState == 4) {
+                handleLoadedTunnel(JSON.parse(req5.responseText), "orange");
+        }}
+        req5.send();
+        var req6 = new XMLHttpRequest();
+        req6.open('GET', 'tube6.json');
+        req6.onreadystatechange = function () {
+            if (req6.readyState == 4) {
+                handleLoadedTunnel(JSON.parse(req6.responseText), "purple");
+        }}
+        req6.send();
+        var req7 = new XMLHttpRequest();
+        req7.open('GET', 'tube7.json');
+        req7.onreadystatechange = function () {
+            if (req7.readyState == 4) {
+                handleLoadedTunnel(JSON.parse(req7.responseText), "cyan");
+        }}
+        req7.send();
+        var req8 = new XMLHttpRequest();
+        req8.open('GET', 'tube8.json');
+        req8.onreadystatechange = function () {
+            if (req8.readyState == 4) {
+                handleLoadedTunnel(JSON.parse(req8.responseText), "magenta");
+        }}
+        req8.send();
+        var req9 = new XMLHttpRequest();
+        req9.open('GET', 'tube9.json');
+        req9.onreadystatechange = function () {
+            if (req9.readyState == 4) {
+                handleLoadedTunnel(JSON.parse(req9.responseText), "lime");
+        }}
+        req9.send();
+        var req10 = new XMLHttpRequest();
+        req10.open('GET', 'tube10.json');
+        req10.onreadystatechange = function () {
+            if (req10.readyState == 4) {
+                handleLoadedTunnel(JSON.parse(req10.responseText), "pink");
+        }}
+        req10.send();
+        var req11 = new XMLHttpRequest();
+        req11.open('GET', 'tube11.json');
+        req11.onreadystatechange = function () {
+            if (req11.readyState == 4) {
+                handleLoadedTunnel(JSON.parse(req11.responseText), "teal");
+        }}
+        req11.send();
+        var req12 = new XMLHttpRequest();
+        req12.open('GET', 'tube12.json');
+        req12.onreadystatechange = function () {
+            if (req12.readyState == 4) {
+                handleLoadedTunnel(JSON.parse(req12.responseText), "lavender");
+        }}
+
+        req12.send();
+    }
+
+    var loadObstacles = function () {
+        var req1 = new XMLHttpRequest();
+        req1.open('GET', 'obst1.json');
+        req1.onreadystatechange = function () {
+            if (req1.readyState == 4) {
+                handleLoadedObstacle(JSON.parse(req1.responseText), "rod1");
+        }}
+        req1.send();
+
+        var req2 = new XMLHttpRequest();
+        req2.open('GET', 'obst1.json');
+        req2.onreadystatechange = function () {
+            if (req2.readyState == 4) {
+                handleLoadedObstacle(JSON.parse(req2.responseText), "rod2");
+        }}
+        req2.send();
+
+        var req3 = new XMLHttpRequest();
+        req3.open('GET', 'obst2.json');
+        req3.onreadystatechange = function () {
+            if (req3.readyState == 4) {
+                handleLoadedObstacle(JSON.parse(req3.responseText), "semi1");
+        }}
+        req3.send();
+
+        var req4 = new XMLHttpRequest();
+        req4.open('GET', 'obst2.json');
+        req4.onreadystatechange = function () {
+            if (req4.readyState == 4) {
+                handleLoadedObstacle(JSON.parse(req4.responseText), "semi2");
+        }}
+        req4.send();
+
+        var req5 = new XMLHttpRequest();
+        req5.open('GET', 'obst3.json');
+        req5.onreadystatechange = function () {
+            if (req4.readyState == 4) {
+                handleLoadedObstacle(JSON.parse(req5.responseText), "wall1");
+        }}
+        req5.send();
+
+        var req6 = new XMLHttpRequest();
+        req6.open('GET', 'obst3.json');
+        req6.onreadystatechange = function () {
+            if (req6.readyState == 4) {
+                handleLoadedObstacle(JSON.parse(req6.responseText), "wall2");
+        }}
+        req6.send();
+    }
+
+    var tunnelAngle = 90;
+
+    function drawScene() {
+        if(gamemode <= 0) return;
+        gl.viewport(0, 0, gl.viewportWidth, gl.viewportHeight);
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+        if (tunnel.lavender == null || tunnel.lavender.VertexPositionBuffer == null || tunnel.lavender.VertexNormalBuffer == null || tunnel.lavender.VertexTextureCoordBuffer == null || tunnel.lavender.VertexIndexBuffer == null) {
+            return;
+        }
+
+        mat4.perspective(45, gl.viewportWidth / gl.viewportHeight, 0.1, 100.0, pMatrix);
+
+        //var specularHighlights = document.getElementById("specular").checked;
+        gl.uniform1i(shaderProgram.showSpecularHighlightsUniform, specularHighlights);
+
+        //var lighting = document.getElementById("lighting").checked;
+        gl.uniform1i(shaderProgram.useLightingUniform, lighting);
+
+        if (lighting) {
+            gl.uniform3f(
+                shaderProgram.ambientColorUniform,
+                parseFloat(0.2), parseFloat(0.2), parseFloat(0.2)
+            );
+
+            gl.uniform3f(
+                shaderProgram.pointLightingLocationUniform,
+                parseFloat(xPos * 1.0),parseFloat(yPos * 1.0),parseFloat(zPos * 1.0)
+            );
+
+            gl.uniform3f(
+                shaderProgram.pointLightingSpecularColorUniform,
+                parseFloat(0.8), parseFloat(0.8), parseFloat(0.8)
+            );
+
+            gl.uniform3f(
+                shaderProgram.pointLightingDiffuseColorUniform,
+                parseFloat(0.8), parseFloat(0.8), parseFloat(0.8)
+            );
+        }
+
+        gl.uniform1i(shaderProgram.useGrayscaleUniform, grayscale);
+
+        gl.uniform1i(shaderProgram.useTexturesUniform, true);
+
+        mat4.identity(mvMatrix);
+
+        var cxp, cyp, czp;
+        cxp = -Math.sin(degToRad(pitch))*truejumpval + xPos;
+        cyp = -Math.cos(degToRad(pitch))*truejumpval + yPos;
+        czp = zPos;
+
+        mat4.rotate(mvMatrix, degToRad(-pitch), [0, 0, 1]);
+        mat4.rotate(mvMatrix, degToRad(-yaw), [0, 1, 0]);
+        mat4.translate(mvMatrix, [-cxp, -cyp, -czp]);
+
+        var rotAng = -tunnelAngle;
+        mat4.rotate(mvMatrix, degToRad(rotAng), [0, 1, 0]);
+        for (var i = 0; i < 12; i++){
+
+            gl.activeTexture(gl.TEXTURE0);
+            var col = cols[i];
+
+            gl.bindTexture(gl.TEXTURE_2D, textureCollection[col]);
+            gl.uniform1i(shaderProgram.samplerUniform, 0);
+
+            if (curpos === i){
+                gl.uniform1i(shaderProgram.useLightingUniform, false);
+            }
+            else if(lighting && i === curpos + 1){
+                gl.uniform1i(shaderProgram.useLightingUniform, true);
+
+                if (lighting) {
+                    gl.uniform3f(
+                        shaderProgram.ambientColorUniform,
+                        parseFloat(0.2), parseFloat(0.2), parseFloat(0.2)
+                    );
+
+                    gl.uniform3f(
+                        shaderProgram.pointLightingLocationUniform,
+                        parseFloat(xPos * 1.0),parseFloat(yPos * 1.0),parseFloat(zPos * 1.0)
+                    );
+
+                    gl.uniform3f(
+                        shaderProgram.pointLightingSpecularColorUniform,
+                        parseFloat(0.8), parseFloat(0.8), parseFloat(0.8)
+                    );
+
+                    gl.uniform3f(
+                        shaderProgram.pointLightingDiffuseColorUniform,
+                        parseFloat(0.8), parseFloat(0.8), parseFloat(0.8)
+                    );
+                }
+            }
+
+            gl.uniform1f(shaderProgram.materialShininessUniform, parseFloat(32.0));
+
+            gl.bindBuffer(gl.ARRAY_BUFFER, tunnel[col].VertexPositionBuffer);
+            gl.vertexAttribPointer(shaderProgram.vertexPositionAttribute, tunnel[col].VertexPositionBuffer.itemSize, gl.FLOAT, false, 0, 0);
+
+            gl.bindBuffer(gl.ARRAY_BUFFER, tunnel[col].VertexTextureCoordBuffer);
+            gl.vertexAttribPointer(shaderProgram.textureCoordAttribute, tunnel[col].VertexTextureCoordBuffer.itemSize, gl.FLOAT, false, 0, 0);
+
+            gl.bindBuffer(gl.ARRAY_BUFFER, tunnel[col].VertexNormalBuffer);
+            gl.vertexAttribPointer(shaderProgram.vertexNormalAttribute, tunnel[col].VertexNormalBuffer.itemSize, gl.FLOAT, false, 0, 0);
+
+            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, tunnel[col].VertexIndexBuffer);
+            setMatrixUniforms();
+            gl.drawElements(gl.TRIANGLES, tunnel[col].VertexIndexBuffer.numItems, gl.UNSIGNED_SHORT, 0);
+        }
+
+        if (lighting) {
+            gl.uniform1i(shaderProgram.useLightingUniform, true);
+            gl.uniform3f(
+                shaderProgram.ambientColorUniform,
+                parseFloat(0.2), parseFloat(0.2), parseFloat(0.2)
+            );
+
+            gl.uniform3f(
+                shaderProgram.pointLightingLocationUniform,
+                parseFloat(xPos * 1.0),parseFloat(yPos * 1.0),parseFloat(zPos * 1.0)
+            );
+
+            gl.uniform3f(
+                shaderProgram.pointLightingSpecularColorUniform,
+                parseFloat(0.8), parseFloat(0.8), parseFloat(0.8)
+            );
+
+            gl.uniform3f(
+                shaderProgram.pointLightingDiffuseColorUniform,
+                parseFloat(0.8), parseFloat(0.8), parseFloat(0.8)
+            );
+        }
+
+        if (level <= 4){
+            for (var i = 0; i < 2; i++){
+                gl.activeTexture(gl.TEXTURE0);
+
+                var off = 0;
+                if (level > 2)
+                    off = 2;
+                col = obss[off + i];
+
+                gl.bindTexture(gl.TEXTURE_2D, textureCollection[obss[i]]);
+                //gl.bindTexture(gl.TEXTURE_2D, textureCollection.brick);
+                gl.uniform1i(shaderProgram.samplerUniform, 0);
+
+                if(i > 0) {
+                    mat4.rotate(mvMatrix, -degToRad(obstacle[obss[off+i-1]].angle), [0,0,1]);
+                    mat4.translate(mvMatrix, [-xPos, -yPos, -zPos]);
+                    mat4.rotate(mvMatrix, degToRad(180), [0, 1, 0]);
+                }
+                mat4.translate(mvMatrix, [xPos, yPos, zPos]);
+                mat4.rotate(mvMatrix, degToRad(obstacle[col].angle), [0, 0, 1]);
+
+                gl.uniform1f(shaderProgram.materialShininessUniform, parseFloat(32.0));
+
+                gl.bindBuffer(gl.ARRAY_BUFFER, obstacle[col].VertexPositionBuffer);
+                gl.vertexAttribPointer(shaderProgram.vertexPositionAttribute, obstacle[col].VertexPositionBuffer.itemSize, gl.FLOAT, false, 0, 0);
+
+                gl.bindBuffer(gl.ARRAY_BUFFER, obstacle[col].VertexTextureCoordBuffer);
+                gl.vertexAttribPointer(shaderProgram.textureCoordAttribute, obstacle[col].VertexTextureCoordBuffer.itemSize, gl.FLOAT, false, 0, 0);
+
+                gl.bindBuffer(gl.ARRAY_BUFFER, obstacle[col].VertexNormalBuffer);
+                gl.vertexAttribPointer(shaderProgram.vertexNormalAttribute, obstacle[col].VertexNormalBuffer.itemSize, gl.FLOAT, false, 0, 0);
+
+                gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, obstacle[col].VertexIndexBuffer);
+                setMatrixUniforms();
+                gl.drawElements(gl.TRIANGLES, obstacle[col].VertexIndexBuffer.numItems, gl.UNSIGNED_SHORT, 0);
+            }
+        }
+        else if (level == 5){
+             for (var i = 0; i < 2; i++){
+                gl.activeTexture(gl.TEXTURE0);
+
+                var off = 4;
+                col = obss[off + i];
+
+                gl.bindTexture(gl.TEXTURE_2D, textureCollection.brick);
+                gl.uniform1i(shaderProgram.samplerUniform, 0);
+
+                if(i > 0) {
+                    mat4.rotate(mvMatrix, -degToRad(obstacle[obss[off+i-1]].angle), [0,0,1]);
+                    mat4.translate(mvMatrix, [-xPos, -yPos, -zPos]);
+                    mat4.rotate(mvMatrix, degToRad(180), [0, 1, 0]);
+                }
+                mat4.translate(mvMatrix, [xPos, yPos, zPos]);
+                mat4.rotate(mvMatrix, degToRad(obstacle[col].angle), [0, 0, 1]);
+
+                gl.uniform1f(shaderProgram.materialShininessUniform, parseFloat(32.0));
+
+                gl.bindBuffer(gl.ARRAY_BUFFER, obstacle[col].VertexPositionBuffer);
+                gl.vertexAttribPointer(shaderProgram.vertexPositionAttribute, obstacle[col].VertexPositionBuffer.itemSize, gl.FLOAT, false, 0, 0);
+
+                gl.bindBuffer(gl.ARRAY_BUFFER, obstacle[col].VertexTextureCoordBuffer);
+                gl.vertexAttribPointer(shaderProgram.textureCoordAttribute, obstacle[col].VertexTextureCoordBuffer.itemSize, gl.FLOAT, false, 0, 0);
+
+                gl.bindBuffer(gl.ARRAY_BUFFER, obstacle[col].VertexNormalBuffer);
+                gl.vertexAttribPointer(shaderProgram.vertexNormalAttribute, obstacle[col].VertexNormalBuffer.itemSize, gl.FLOAT, false, 0, 0);
+
+                gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, obstacle[col].VertexIndexBuffer);
+                setMatrixUniforms();
+                gl.drawElements(gl.TRIANGLES, obstacle[col].VertexIndexBuffer.numItems, gl.UNSIGNED_SHORT, 0);
+            }           
+        }
+    }
+
+
+    var lastTime = 0;
+
+    function animate() {
+        if(gamemode <= 0) return;
+        var timeNow = new Date().getTime();
+        if (lastTime != 0) {
+            var elapsed = timeNow - lastTime;
+            var factor = 1.0 + level * 0.2;
+            tunnelAngle += 0.05 * elapsed * factor;
+            if (tunnelAngle >= 360.0) tunnelAngle -= 360.0;
+
+            if (speed != 0) {
+                xPos -= Math.sin(degToRad(yaw)) * speed * elapsed;
+                zPos -= Math.cos(degToRad(yaw)) * speed * elapsed;
+                yPos = Math.sin(degToRad(joggingAngle)) / 20 + 0.4
+            }
+            yaw += yawRate * elapsed;
+
+            var temp = (curpos + 3) % 12;
+            if(Math.abs(pitch - temp * 30) > 2.0){
+                pitch += turntaken * 2.0;
+                if (pitch >= 360.0) pitch -= 360.0;
+                if (pitch <= 0.0) pitch += 360.0;
+            }
+            else
+                pitch = temp * 30;
+
+            if (jump){
+                jumpval += 0.0025 * elapsed;
+                if(jumpval > distjump) truejumpval = 2*distjump - jumpval;
+                else truejumpval = jumpval;
+                truejumpval = distjump - truejumpval;
+                if (jumpval > 2*distjump){
+                    jumpval = 0.0;
+                    jump = false;
+                    truejumpval = distjump;
+                }
+            }
+
+            if (level == 2) {
+                obstacle.rod1.angle += 3;
+                obstacle.rod2.angle -= 3;
+                if(obstacle.rod1.angle >= 360) obstacle.rod1.angle = 0;
+                if(obstacle.rod2.angle <= 0) obstacle.rod2.angle = 360;
+            }
+            if (level == 4) {
+                obstacle.semi1.angle += 3;
+                obstacle.semi2.angle -= 3;
+                if(obstacle.semi1.angle >= 360) obstacle.semi1.angle = 0;
+                if(obstacle.semi2.angle <= 0) obstacle.semi2.angle = 360;
+            }
+        }
+        lastTime = timeNow;
+    }
+
+    function obstacleManager() {
+        if(gamemode <= 0) return;
+
+        var addAngle = 0;
+        for (var i = 0; i < 2; i++){
+            var chAngle = Math.abs(-tunnelAngle + addAngle);
+            if(chAngle <= 1.0 || chAngle >= 359.0){
+                var newchAngle = 0;
+
+                if(level <= 2) newchAngle = -obstacle[obss[i]].angle;
+                else if(level <= 4) newchAngle = -obstacle[obss[2+i]].angle;
+
+                cxp = -Math.sin(degToRad(pitch))*truejumpval;
+                cyp = -Math.cos(degToRad(pitch))*truejumpval;
+                cxp2 = cxp * Math.cos(degToRad(newchAngle)) - Math.sin(degToRad(newchAngle)) * cyp;
+                cyp2 = cxp * Math.sin(degToRad(newchAngle)) + Math.cos(degToRad(newchAngle)) * cyp;
+
+                if(
+                    (level <= 2 && cxp2 <= 0.4 && cxp2 >= -0.4 && cyp2 >= -3.0 && cyp2 <= 3.0) ||
+                    (level > 2 && level <= 4 && cxp2 >= 0.0) ||
+                    (level === 5 && !jump)
+                )
+                {
+                    console.log("hit");
+                    return true;
+                }
+
+            }
+            else if (chAngle >= 190.0 && chAngle <= 192.0 && level <= 4){
+                if(level === 1)
+                    obstacle[obss[i]].angle = Math.floor(Math.random() * 12) * 30;
+                else if(level === 3)
+                    obstacle[obss[2+i]].angle = Math.floor(Math.random() * 12) * 30;
+            }
+            addAngle += 180;
+        }
+        if(level === 1){
+            if(tunnelAngle >= 178.0 && tunnelAngle <= 182.0)
+                obstacle[obss[0]].angle = Math.floor(Math.random() * 12) * 30;
+            else if(tunnelAngle >= 10.0 && tunnelAngle <= 14.0)
+                obstacle[obss[1]].angle = Math.floor(Math.random() * 12) * 30;
+        }
+        else if(level === 3){
+            if(tunnelAngle >= 178.0 && tunnelAngle <= 182.0)
+                obstacle[obss[2]].angle = Math.floor(Math.random() * 12) * 30;
+            else if(tunnelAngle >= 10.0 && tunnelAngle <= 14.0)
+                obstacle[obss[3]].angle = Math.floor(Math.random() * 12) * 30;
+        }
+        return false;
+    }
+
+    function tick() {
+        requestAnimFrame(tick);
+        handleKeys();
+        drawScene();
+        animate();
+        if(obstacleManager() === true){
+            if(!overrideDeath)
+            {
+                gamemode = -1;
+                var temp = document.getElementById("ptslost");
+                temp.innerHTML = points.toString();
+                var temp = document.getElementById("lvllost");
+                temp.innerHTML = level.toString();
+
+                var ingame = document.getElementById("ingame");
+                var lostgame = document.getElementById("lostgame");
+                ingame.setAttribute("hidden", "true");
+                lostgame.removeAttribute("hidden");
+            }
+        }
+    }
+
+
+    function webGLStart() {
+        var canvas = document.getElementById("canvas");
+        initGL(canvas);
+        initShaders();
+        initTextures();
+        loadTunnel();
+        loadObstacles();
+
+        gl.clearColor(0.0, 0.0, 0.0, 1.0);
+        gl.enable(gl.DEPTH_TEST);
+
+        document.onkeydown = handleKeyDown;
+        document.onkeyup = handleKeyUp;
+
+        setInterval(function() {
+            if (gamemode <= 0) return;
+            points += 1;
+            if(points % 20 === 0){
+                level += 1;
+            }
+            if (level === 6){
+                gamemode = -1;
+                gamestatus = true;
+
+                var ingame = document.getElementById("ingame");
+                var wongame = document.getElementById("wongame");
+                ingame.setAttribute("hidden", "true");
+                wongame.removeAttribute("hidden");
+            }
+            var span = document.getElementById("points");
+            span.innerText = points.toString();
+            var span = document.getElementById("levels");
+            span.innerText = level.toString();
+        }, 1000);
+
+        tick();
+    }
+
+</script>
+
+
+<style type="text/css">
+    #loadingtext {
+        position:absolute;
+        top:250px;
+        left:150px;
+        font-size:2em;
+        color: white;
+    }
+    .container {
+    position: relative;
+        }
+        .overlay {
+    position: absolute;
+    left:350px;
+    top: 10px;
+    background-color: rgba(0, 0, 0, 0.7);
+    color: white;
+    font-family: monospace;
+    padding: 1em;
+    }
+    canvas {
+            padding: 0;
+    margin: auto;
+    display: block;
+    width: 600px;
+
+        }
+</style>
+
+
 </head>
-<body onload=';'>
 
-  <div id='canvasContainer'>
-    <canvas id="canvas"></canvas>
+
+<body onload="webGLStart();" bgcolor="black">
+    <div class="container">
+        <canvas id="canvas" width="500" height="500"></canvas>
+        <div hidden class="overlay" id="ingame">
+            <div>Points: <span id="points"></span></div>
+            <div>Level#: <span id="levels"></span></div>
+        </div>
+        <div class="overlay" id="pregame" style="text-align:left">
+            <div>Move Left = A</div>
+            <div>Move Right = D</div>
+            <div>Jump = Space</div>
+            <div>Toggle Specular Highlights = Q</div>
+            <div>Toggle Lighting = W</div>
+            <div>Toggle Grayscale = E</div>
+            <div>Toggle Override Death = R</div>
+            <div>Pause Game = P</div>
+            <div>Press Enter to Start/Unpause the Game</div>
+        </div>
+        <div class = "overlay" id="wongame" hidden>
+            <div>Congrats you won the game!</div>
+            <div>You won 100 points across 5 levels!</div>
+        </div>
+        <div class = "overlay" id="lostgame" hidden>
+            <div>Ouch you lost the game :(</div>
+            <div>You won <span id="ptslost"></span> points across <span id="lvllost"></span> levels!</div>
+        </div>
   </div>
 
-  <!--<audio src="assets/background.m4a" id='backaudio' loop></audio>-->
+    <br/>
 </body>
-<script type="module" src="./main.js"></script>
+
 </html>
