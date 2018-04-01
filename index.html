@@ -19,6 +19,8 @@
     uniform bool uShowSpecularHighlights;
     uniform bool uUseLighting;
     uniform bool uUseGrayscale;
+    uniform bool uUseSepia;
+    uniform bool uUseNegative;
     uniform bool uUseTextures;
 
     uniform vec3 uAmbientColor;
@@ -65,6 +67,20 @@
             fragmentColor.r = fragmentColor.r + f * (L - fragmentColor.r);
             fragmentColor.g = fragmentColor.g + f * (L - fragmentColor.g);
             fragmentColor.b = fragmentColor.b + f * (L - fragmentColor.b);
+        }
+        else if (uUseSepia) {
+            float nr = 0.0, ng = 0.0, nb = 0.0;
+            nr = (fragmentColor.r * 0.393) + (fragmentColor.g * 0.769) + (fragmentColor.b * 0.189);
+            ng = (fragmentColor.r * 0.349) + (fragmentColor.g * 0.686) + (fragmentColor.b * 0.168);
+            nb = (fragmentColor.r * 0.272) + (fragmentColor.g * 0.272) + (fragmentColor.b * 0.131);
+            fragmentColor.r = nr;
+            fragmentColor.g = ng;
+            fragmentColor.b = nb;
+        }
+        else if (uUseNegative) {
+            fragmentColor.r = 1.0 - fragmentColor.r;
+            fragmentColor.g = 1.0 - fragmentColor.g;
+            fragmentColor.b = 1.0 - fragmentColor.b;
         }
 
         gl_FragColor = vec4(fragmentColor.rgb * lightWeighting, fragmentColor.a);
@@ -183,6 +199,8 @@
         shaderProgram.showSpecularHighlightsUniform = gl.getUniformLocation(shaderProgram, "uShowSpecularHighlights");
         shaderProgram.useTexturesUniform = gl.getUniformLocation(shaderProgram, "uUseTextures");
         shaderProgram.useGrayscaleUniform = gl.getUniformLocation(shaderProgram, "uUseGrayscale");
+        shaderProgram.useSepiaUniform = gl.getUniformLocation(shaderProgram, "uUseSepia");
+        shaderProgram.useNegativeUniform = gl.getUniformLocation(shaderProgram, "uUseNegative");
         shaderProgram.useLightingUniform = gl.getUniformLocation(shaderProgram, "uUseLighting");
         shaderProgram.ambientColorUniform = gl.getUniformLocation(shaderProgram, "uAmbientColor");
         shaderProgram.pointLightingLocationUniform = gl.getUniformLocation(shaderProgram, "uPointLightingLocation");
@@ -360,6 +378,18 @@
         }
         if (String.fromCharCode(event.keyCode) === "E") {
             grayscale = !grayscale;
+            sepia = false;
+            negative = false;
+        }
+        if (String.fromCharCode(event.keyCode) === "T") {
+            sepia = !sepia;
+            grayscale = false;
+            negative = false;
+        }
+        if (String.fromCharCode(event.keyCode) === "Y") {
+            negative = !negative;
+            sepia = false;
+            grayscale = false;
         }
         if (String.fromCharCode(event.keyCode) === "R") {
             overrideDeath = !overrideDeath;
@@ -388,6 +418,8 @@
     var specularHighlights = false;
     var lighting = false;
     var grayscale = false;
+    var sepia = false;
+    var negative = false;
     var overrideDeath = false;
     // pl
     var points = 0;
@@ -655,6 +687,8 @@
         }
 
         gl.uniform1i(shaderProgram.useGrayscaleUniform, grayscale);
+        gl.uniform1i(shaderProgram.useSepiaUniform, sepia);
+        gl.uniform1i(shaderProgram.useNegativeUniform, negative);
 
         gl.uniform1i(shaderProgram.useTexturesUniform, true);
 
@@ -1025,6 +1059,9 @@
 
 
 <body onload="webGLStart();" bgcolor="black">
+    <audio autoplay loop="loop">
+        <source src="music.mp3" type="audio/mpeg"/>
+    </audio>
     <div class="container">
         <canvas id="canvas" width="500" height="500"></canvas>
         <div hidden class="overlay" id="ingame">
@@ -1039,6 +1076,8 @@
             <div>Toggle Lighting = W</div>
             <div>Toggle Grayscale = E</div>
             <div>Toggle Override Death = R</div>
+            <div>Toggle Sepia = T</div>
+            <div>Toggle Negative = Y</div>
             <div>Pause Game = P</div>
             <div>Press Enter to Start/Unpause the Game</div>
         </div>
