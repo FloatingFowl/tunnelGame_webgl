@@ -631,7 +631,7 @@
         var req5 = new XMLHttpRequest();
         req5.open('GET', 'obst3.json');
         req5.onreadystatechange = function () {
-            if (req4.readyState == 4) {
+            if (req5.readyState == 4) {
                 handleLoadedObstacle(JSON.parse(req5.responseText), "wall1");
         }}
         req5.send();
