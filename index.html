@@ -1014,6 +1014,10 @@
         wongame.setAttribute("hidden", "true");
         lostgame.setAttribute("hidden", "true");
         scoreboard.removeAttribute("hidden");
+        var span = document.getElementById("points");
+        span.innerText = points.toString();
+        var span = document.getElementById("levels");
+        span.innerText = level.toString();
     }
 
     function webGLStart() {
@@ -1101,6 +1105,7 @@
             <div>Level#: <span id="levels"></span></div>
         </div>
         <div class="overlay" id="pregame" style="text-align:left">
+            <div>Username : Makkan Mais</div><br>
             <div>Move Left = A</div>
             <div>Move Right = D</div>
             <div>Jump = Space</div>
