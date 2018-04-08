@@ -1,5 +1,5 @@
 <html>
-
+                
 <head>
 <title>Tunnel Rush</title>
 <meta http-equiv="content-type" content="text/html; charset=ISO-8859-1">
@@ -353,16 +353,12 @@
         currentlyPressedKeys[event.keyCode] = true;
         if (String.fromCharCode(event.keyCode) == "D") {
             curpos = (curpos + 1) % 12;
-            //if(curpos == 9 || curpos == 2) distjump = 1.2;
-            //if(curpos == 8 || curpos == 3) distjump = 0.7;
             distjump = djmap[curpos]
             if(!jump) truejumpval = distjump;
             turntaken = 1;
         }
         if (String.fromCharCode(event.keyCode) == "A") {
             curpos = (12 + curpos - 1) % 12;
-            //if(curpos == 9 || curpos == 2) distjump = 1.2;
-            //if(curpos == 8 || curpos == 3) distjump = 0.7;
             distjump = djmap[curpos]
             if(!jump) truejumpval = distjump;
             turntaken = -1;
@@ -408,6 +404,9 @@
             var scoreboard = document.getElementById("ingame");
             scoreboard.setAttribute("hidden", "true");
             help.removeAttribute("hidden");
+        }
+        if (String.fromCharCode(event.keyCode) === "N" && gamemode == -1) {
+            restart();
         }
     }
     function handleKeyUp(event) {
@@ -649,8 +648,7 @@
 
     function drawScene() {
         if(gamemode <= 0) return;
-        //gl.viewport(0, 0, gl.viewportWidth, gl.viewportHeight);
-        gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
+        gl.viewport(0, 0, gl.viewportWidth, gl.viewportHeight);
         gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
         if (tunnel.lavender == null || tunnel.lavender.VertexPositionBuffer == null || tunnel.lavender.VertexNormalBuffer == null || tunnel.lavender.VertexTextureCoordBuffer == null || tunnel.lavender.VertexIndexBuffer == null) {
@@ -984,6 +982,39 @@
         }
     }
 
+    function restart() {
+        lastTime = new Date().getTime();
+        points = 0;
+        level = 1;
+        tunnelAngle = 90;
+        // pl
+        points = 0;
+        gamemode = 1;
+        level = 1;
+        // mainguy
+        distjump = 1.2;
+        curpos = 9;
+        turntaken = 0;
+        jump = false;
+        jumpval = 0;
+        truejumpval = distjump;
+        // camera stuff
+        pitch = 10;
+        pitchRate = 0;
+        yaw = 210;
+        yawRate = 0;
+        xPos = -8.6;
+        yPos = 0.0;
+        zPos = 0;
+        speed = 0;
+        //html
+        var wongame = document.getElementById("wongame");
+        var lostgame = document.getElementById("lostgame");
+        var scoreboard = document.getElementById("ingame");
+        wongame.setAttribute("hidden", "true");
+        lostgame.setAttribute("hidden", "true");
+        scoreboard.removeAttribute("hidden");
+    }
 
     function webGLStart() {
         var canvas = document.getElementById("canvas");
@@ -1027,11 +1058,6 @@
 
 
 <style type="text/css">
-    html, body {
-  width:  100%;
-  height: 100%;
-  margin: 0px;
-}
     #loadingtext {
         position:absolute;
         top:250px;
@@ -1090,10 +1116,14 @@
         <div class = "overlay" id="wongame" hidden>
             <div>Congrats you won the game!</div>
             <div>You won 100 points across 5 levels!</div>
+            <br>
+            <div>Press N to Restart...</div>
         </div>
         <div class = "overlay" id="lostgame" hidden>
             <div>Ouch you lost the game :(</div>
             <div>You won <span id="ptslost"></span> points across <span id="lvllost"></span> levels!</div>
+            <br>
+            <div>Press N to Restart...</div>
         </div>
   </div>
 
